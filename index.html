@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>发动机水位监测</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+<style>
+  :root {
+    --bg: #10151c;
+    --card: #1a222d;
+    --card-2: #222c39;
+    --line: #314052;
+    --text: #e8eef6;
+    --muted: #93a1b5;
+    --red: #e24b4b;
+    --yellow: #e2b340;
+    --blue: #3c86e8;
+    --green: #3cba8b;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.45;
+  }
+  button, input { font: inherit; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-end;
+    padding: 28px 28px 8px;
+  }
+  h1 { margin: 0; font-size: 28px; letter-spacing: 0.02em; }
+  .sub { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  main { padding: 12px 28px 40px; max-width: 1180px; }
+  .banner {
+    display: none;
+    margin: 12px 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #3a2a16;
+    color: #ffd89a;
+    border: 1px solid #6a5228;
+  }
+  .banner.show { display: block; }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin: 16px 0 18px;
+  }
+  button {
+    border: 0;
+    border-radius: 10px;
+    padding: 11px 16px;
+    cursor: pointer;
+    color: white;
+    background: var(--blue);
+  }
+  button.secondary { background: var(--card-2); color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: 0.55; cursor: default; }
+  .pill {
+    margin-left: auto;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: var(--card);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    font-size: 14px;
+  }
+  .pill.on { color: var(--green); border-color: #245c48; }
+  .grid3, .split { display: grid; gap: 14px; }
+  .grid3 { grid-template-columns: repeat(3, 1fr); }
+  .split { grid-template-columns: 1.1fr 0.9fr; margin-top: 14px; }
+  .grid3 > *, .split > *, .card { min-width: 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .metric .k { color: var(--muted); font-size: 14px; }
+  .metric .v { font-size: 42px; font-weight: 700; margin: 6px 0 0; letter-spacing: -0.03em; }
+  .metric .u { font-size: 16px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+  .alarm-0 { box-shadow: inset 0 0 0 2px var(--blue); }
+  .alarm-1 { box-shadow: inset 0 0 0 2px var(--yellow); }
+  .alarm-2 { box-shadow: inset 0 0 0 2px var(--red); }
+  .alarm-3 { box-shadow: inset 0 0 0 2px var(--line); }
+  .tag {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 13px;
+    background: var(--card-2);
+  }
+  .tag.red { color: #ffd0d0; background: #4a2224; }
+  .tag.yellow { color: #ffe7ad; background: #4a3d1c; }
+  .tag.blue { color: #d4e6ff; background: #1c334f; }
+  .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 8px; }
+  .rows div { background: var(--card-2); border-radius: 10px; padding: 10px 12px; }
+  .rows span { display: block; color: var(--muted); font-size: 13px; }
+  .rows strong { font-size: 22px; }
+  .formula { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .tank-wrap { display: flex; gap: 18px; align-items: center; }
+  .tank {
+    position: relative;
+    width: 92px;
+    height: 220px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: #121820;
+    overflow: hidden;
+    flex: none;
+  }
+  .fill {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 0;
+    background: var(--blue);
+    transition: height 0.25s linear, background 0.2s linear;
+  }
+  .mark {
+    position: absolute;
+    left: 0; right: 0;
+    border-top: 1px dashed rgba(255,255,255,0.35);
+    font-size: 11px;
+    color: #d5deea;
+    padding-left: 6px;
+    transform: translateY(-100%);
+  }
+  .gps-status { font-size: 18px; margin: 8px 0; }
+  .gps-status.danger { color: var(--red); }
+  .gps-status.safe { color: var(--green); }
+  label.range { display: block; color: var(--muted); font-size: 14px; margin-top: 8px; }
+  input[type="range"] { width: 100%; }
+  #map { height: 460px; width: 100%; max-width: 100%; border-radius: 14px; background: #0d131a; overflow: hidden; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; }
+  tr.inside td { color: #ffb4b4; }
+  details { margin-top: 16px; color: var(--muted); }
+  details summary { cursor: pointer; color: var(--text); }
+  code { color: #d5e4ff; }
+  @media (max-width: 860px) {
+    header, main { padding-left: 16px; padding-right: 16px; }
+    .grid3, .split, .rows { grid-template-columns: 1fr; }
+    .toolbar { display: grid; grid-template-columns: 1fr; }
+    .pill { margin-left: 0; justify-self: start; }
+    button { min-width: 0; }
+    .metric .v { font-size: 34px; }
+    #map { height: 320px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>发动机水位监测</h1>
+    <p class="sub">ESP32 通过蓝牙发送水位、坡度和警报。进入黄色或红色时，这个网页会发出警报声。GPS 使用这台设备的定位，对照危险地区。</p>
+  </div>
+</header>
+<main>
+  <div id="banner" class="banner"></div>
+  <div class="toolbar">
+    <button id="connectBtn" type="button">连接蓝牙</button>
+    <button id="scanAllBtn" class="secondary" type="button">显示附近所有设备</button>
+    <button id="demoBtn" class="secondary" type="button">预览演示</button>
+    <button id="locateBtn" class="secondary" type="button">定位我的位置</button>
+    <button id="muteBtn" class="secondary" type="button">警报声开</button>
+    <div id="linkPill" class="pill">未连接</div>
+  </div>
+
+  <section class="grid3">
+    <article class="card metric">
+      <div class="k">实时高度 · 发动机实际水位</div>
+      <div class="v"><span id="engine">--</span><span class="u">cm</span></div>
+    </article>
+    <article class="card metric">
+      <div class="k">实时角度 · 坡度</div>
+      <div class="v"><span id="angle">--</span><span class="u">°</span></div>
+      <div id="angleNote" class="tag">等待数据</div>
+    </article>
+    <article class="card metric" id="alarmCard">
+      <div class="k">实时警报</div>
+      <div class="v" id="alarmText" style="font-size:32px">等待数据</div>
+      <div id="age" class="tag">尚无数据</div>
+    </article>
+  </section>
+
+  <section class="split">
+    <article class="card">
+      <div class="k">水位分解</div>
+      <div class="rows">
+        <div><span>传感器高度（超声波）</span><strong id="dist">--</strong></div>
+        <div><span>垂直水位</span><strong id="vertical">--</strong></div>
+        <div><span>发动机实际水位</span><strong id="engine2">--</strong></div>
+        <div><span>1米后预测高度</span><strong id="predict">--</strong></div>
+      </div>
+      <p class="formula">垂直水位 = 90 − 传感器高度 × cos(倾角)</p>
+      <p class="formula">发动机实际水位 = 垂直水位 + 100 × sin(倾角)</p>
+      <p class="formula">1米后预测高度 = 垂直水位 + 200 × sin(倾角)</p>
+      <p class="formula">大于等于 50 cm 红色预警；大于 40 cm 且小于 50 cm 黄色等待；小于等于 40 cm 蓝色安全。</p>
+      <details>
+        <summary>加速度原始值</summary>
+        <p id="rawAccel">尚未收到 ax / ay / az。</p>
+      </details>
+    </article>
+    <article class="card">
+      <div class="k">水位标尺（0–80 cm）</div>
+      <div class="tank-wrap">
+        <div class="tank" aria-hidden="true">
+          <div id="mark50" class="mark">50</div>
+          <div id="mark40" class="mark">40</div>
+          <div id="fill" class="fill"></div>
+        </div>
+        <div>
+          <p id="gaugeLabel" style="margin:0;font-size:18px">等待蓝牙数据</p>
+          <p class="formula">灯带在 ESP32 的 D2 上同步变色：红、黄、蓝。</p>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="split">
+    <article class="card">
+      <div class="k">GPS 定位</div>
+      <p id="here" class="formula">还没有定位。点击「定位我的位置」，并允许浏览器使用位置。</p>
+      <p id="gpsStatus" class="gps-status">尚未定位</p>
+      <label class="range">危险范围 <output id="radiusOut">1000</output> 米
+        <input id="radius" type="range" min="200" max="5000" step="100" value="1000" aria-label="危险范围（米）" />
+      </label>
+      <p class="formula">名单来自《gps-危险地区》。进入滑块范围内即标成危险地区。</p>
+    </article>
+    <article class="card" style="padding:10px">
+      <div id="map"></div>
+    </article>
+  </section>
+
+  <article class="card" style="margin-top:14px">
+    <div class="k">危险地区</div>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>地点</th><th>北纬</th><th>东经</th><th>距离</th></tr>
+      </thead>
+      <tbody id="zoneBody"></tbody>
+    </table>
+    </div>
+  </article>
+
+  <details>
+    <summary>接线、上传和打开网页</summary>
+    <p>超声波 TRIG = D8（GPIO5），ECHO = D9（GPIO2）。LIS2DH 和 OLED 接 I2C：SDA = GPIO21，SCL = GPIO22。灯带 DIN = D2（GPIO25），灯带要单独供电并和主板共地。</p>
+    <p>用 Arduino IDE 打开 <code>esp32_water_monitor/esp32_water_monitor.ino</code>，开发板选 FireBeetle-ESP32（或 ESP32 Dev Module），上传。蓝牙名称是 <code>B-Water</code>。</p>
+    <p>正式网页地址：<a href="https://liujibin-keystone.github.io/water-level-monitor/">https://liujibin-keystone.github.io/water-level-monitor/</a>。用 Chrome 或 Edge 打开即可连接蓝牙。Mac 上的 Safari 没有网页蓝牙。不要直接双击 html 文件。本机调试时，双击同目录的「打开水位监测网页.command」，或运行 <code>python3 -m http.server 8765</code> 后打开 <code>http://localhost:8765/水位监测.html</code>。</p>
+    <p>Mind+ 工程里没有 GPS 模块，定位用的是打开这个网页的电脑或手机。</p>
+  </details>
+</main>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script>
+const SERVICE = "8f3c0001-7a2e-4b6d-9c1f-5e0a1b2c3d4e";
+const CHARACTERISTIC = "8f3c0002-7a2e-4b6d-9c1f-5e0a1b2c3d4e";
+const ZONES = [
+  { name: "后沙峪", lat: 40.099266, lng: 116.536609 },
+  { name: "祥云小镇", lat: 40.087, lng: 116.537 },
+  { name: "龙湖长楹天街", lat: 39.924542, lng: 116.599591 },
+  { name: "天安门", lat: 39.907159, lng: 116.397128 },
+  { name: "孙河", lat: 40.041565, lng: 116.523633 },
+  { name: "清华大学", lat: 40.00, lng: 116.33 },
+  { name: "中央音乐学院", lat: 39.9027, lng: 116.3595 },
+  { name: "蓝色港湾SOLANA", lat: 39.949336, lng: 116.475944 },
+  { name: "鸟巢", lat: 39.99, lng: 116.40 },
+  { name: "水立方", lat: 39.993758, lng: 116.391649 },
+  { name: "鼎石学校", lat: 40.11376, lng: 116.55341 }
+];
+
+const $ = (id) => document.getElementById(id);
+const banner = $("banner");
+const linkPill = $("linkPill");
+let device = null;
+let demoTimer = null;
+let lastAt = 0;
+let audioCtx = null;
+let alarmTimer = null;
+let alarmMode = null;
+let lastAlarmLevel = 0;
+let alarmMuted = false;
+let gps = null;
+let map, userMarker, userCircle, zoneLayer;
+let fitted = false;
+
+function showBanner(text) {
+  banner.textContent = text;
+  banner.classList.add("show");
+}
+function hideBanner() {
+  banner.classList.remove("show");
+}
+
+if (location.protocol === "file:") {
+  showBanner("当前是直接打开文件，Chrome 不允许网页使用蓝牙。请双击「打开水位监测网页.command」，或运行 python3 -m http.server 8765 后打开 http://localhost:8765/水位监测.html 。");
+}
+if (!navigator.bluetooth) {
+  showBanner("当前这个浏览器没有蓝牙。Mac 上的 Safari 连不上 ESP32。请用 Chrome 或 Edge 打开这个 https 网页。地址栏如果是 file:// 也不行。");
+}
+
+function fmt(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "--";
+  return (Math.round(v * 10) / 10).toFixed(1);
+}
+
+const ALARM = {
+  0: { text: "蓝色安全", cls: "alarm-0", fill: "#3c86e8", tag: "blue" },
+  1: { text: "黄色等待", cls: "alarm-1", fill: "#e2b340", tag: "yellow" },
+  2: { text: "红色预警", cls: "alarm-2", fill: "#e24b4b", tag: "red" },
+  3: { text: "超声波无数据", cls: "alarm-3", fill: "#314052", tag: "" }
+};
+
+function render(s) {
+  lastAt = Date.now();
+  const alarm = ALARM[s.alarm] || ALARM[3];
+  $("engine").textContent = s.ultraOk ? fmt(s.engine) : "--";
+  $("engine2").textContent = s.ultraOk ? fmt(s.engine) + " cm" : "--";
+  $("vertical").textContent = s.ultraOk ? fmt(s.vertical) + " cm" : "--";
+  $("predict").textContent = s.ultraOk ? fmt(s.predict) + " cm" : "--";
+  $("dist").textContent = s.ultraOk ? fmt(s.dist) + " cm" : "--";
+  $("angle").textContent = s.accelOk ? fmt(s.angle) : "--";
+  $("angleNote").textContent = s.accelOk ? "LIS2DH 坡度" : "倾角传感器未连接，公式按 0°";
+  $("angleNote").className = "tag" + (s.accelOk ? "" : " yellow");
+  $("alarmText").textContent = alarm.text;
+  $("alarmCard").className = "card metric " + alarm.cls;
+  $("age").textContent = s.source === "demo" ? "演示数据" : "刚刚更新";
+  $("age").className = "tag " + alarm.tag;
+  const h = s.ultraOk ? Math.max(0, Math.min(80, s.engine)) : 0;
+  $("fill").style.height = (h / 80 * 100) + "%";
+  $("fill").style.background = alarm.fill;
+  $("gaugeLabel").textContent = s.ultraOk ? (alarm.text + " · " + fmt(s.engine) + " cm") : alarm.text;
+  if (s.accelOk) {
+    $("rawAccel").textContent = "ax " + s.ax + " mg，ay " + s.ay + " mg，az " + s.az + " mg";
+  } else {
+    $("rawAccel").textContent = "还没有加速度数据。";
+  }
+  document.title = s.ultraOk ? (alarm.text + " · " + fmt(s.engine) + " cm") : "发动机水位监测";
+  lastAlarmLevel = s.alarm;
+  syncAlarm(s.alarm);
+}
+
+function unlockAudio() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
+
+function beep(freq, duration, volume) {
+  if (!audioCtx || alarmMuted) return;
+  const start = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "square";
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(volume, start + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(start);
+  osc.stop(start + duration + 0.02);
+}
+
+function stopAlarm() {
+  if (alarmTimer) clearInterval(alarmTimer);
+  alarmTimer = null;
+  alarmMode = null;
+}
+
+function startAlarm(level) {
+  if (alarmMode === level) return;
+  stopAlarm();
+  alarmMode = level;
+  const tick = () => {
+    if (alarmMuted || !audioCtx) return;
+    if (level === 2) {
+      beep(880, 0.16, 0.2);
+      setTimeout(() => { if (alarmMode === 2) beep(1200, 0.16, 0.2); }, 200);
+    } else {
+      beep(740, 0.28, 0.14);
+    }
+  };
+  tick();
+  alarmTimer = setInterval(tick, level === 2 ? 650 : 1400);
+}
+
+function syncAlarm(level) {
+  if (alarmMuted || level === 0 || level === 3) {
+    stopAlarm();
+    return;
+  }
+  if (level === 1 || level === 2) startAlarm(level);
+}
+
+function parsePacket(view) {
+  if (view.byteLength < 18) return;
+  const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  const d = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const flags = d.getUint8(11);
+  render({
+    dist: d.getInt16(0, true) / 10,
+    angle: d.getInt16(2, true) / 10,
+    vertical: d.getInt16(4, true) / 10,
+    engine: d.getInt16(6, true) / 10,
+    predict: d.getInt16(8, true) / 10,
+    alarm: d.getUint8(10),
+    ultraOk: (flags & 0x01) !== 0,
+    accelOk: (flags & 0x02) !== 0,
+    ax: d.getInt16(12, true),
+    ay: d.getInt16(14, true),
+    az: d.getInt16(16, true),
+    source: "ble"
+  });
+}
+
+function stopDemo() {
+  if (demoTimer) clearInterval(demoTimer);
+  demoTimer = null;
+  $("demoBtn").textContent = "预览演示";
+}
+
+function startDemo() {
+  if (device && device.gatt && device.gatt.connected) return;
+  stopDemo();
+  $("demoBtn").textContent = "停止演示";
+  linkPill.textContent = "演示中，尚未连接 ESP32";
+  linkPill.classList.remove("on");
+  const tick = () => {
+    const t = Date.now() / 1000;
+    const angle = 12 * Math.sin(t / 3);
+    const dist = 52 + 18 * Math.sin(t / 4);
+    const rad = angle * Math.PI / 180;
+    const vertical = 90 - dist * Math.cos(rad);
+    const engine = Math.round((vertical + 100 * Math.sin(rad)) * 10) / 10;
+    const predict = vertical + 200 * Math.sin(rad);
+    let alarm = 0;
+    if (engine >= 50) alarm = 2;
+    else if (engine > 40) alarm = 1;
+    render({
+      dist, angle, vertical, engine, predict, alarm,
+      ultraOk: true, accelOk: true,
+      ax: Math.round(-Math.sin(rad) * 1000),
+      ay: 0,
+      az: Math.round(Math.cos(rad) * 1000),
+      source: "demo"
+    });
+  };
+  tick();
+  demoTimer = setInterval(tick, 400);
+}
+
+function bleFail(err) {
+  linkPill.textContent = "未连接";
+  linkPill.classList.remove("on");
+  $("connectBtn").textContent = "连接蓝牙";
+  const name = err && err.name ? err.name : "";
+  if (name === "NotFoundError") {
+    showBanner("没有选中设备。列表是空的时：先确认新程序已经上传到 ESP32，板子已上电；再点「显示附近所有设备」。Mac 请用 Chrome，不要用 Safari。");
+    return;
+  }
+  if (name === "SecurityError") {
+    showBanner("这个页面地址不能用蓝牙。请用 Chrome 打开 GitHub Pages 的 https 地址，或本机的 http://localhost，不要直接双击 html 文件。");
+    return;
+  }
+  if (name === "NetworkError") {
+    showBanner("已经看到设备，但连接被中断。把板子靠近电脑，按一下复位键，再点一次连接。");
+    return;
+  }
+  showBanner("蓝牙连接没有完成：" + (err && err.message ? err.message : err));
+}
+
+async function connect(acceptAll) {
+  if (!navigator.bluetooth) {
+    showBanner("当前这个浏览器没有蓝牙。请用 Chrome 或 Edge 打开本页。Safari 连不上 ESP32。");
+    return;
+  }
+  if (device && device.gatt && device.gatt.connected) {
+    device.gatt.disconnect();
+    return;
+  }
+  try {
+    hideBanner();
+    linkPill.textContent = acceptAll ? "请在列表里选择 B-Water" : "正在寻找 B-Water";
+    const options = acceptAll
+      ? { acceptAllDevices: true, optionalServices: [SERVICE] }
+      : {
+          filters: [{ name: "B-Water" }, { namePrefix: "B-Water" }, { services: [SERVICE] }],
+          optionalServices: [SERVICE]
+        };
+    device = await navigator.bluetooth.requestDevice(options);
+    linkPill.textContent = "正在连接 " + (device.name || "设备");
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE);
+    const ch = await service.getCharacteristic(CHARACTERISTIC);
+    ch.addEventListener("characteristicvaluechanged", (ev) => parsePacket(ev.target.value));
+    await ch.startNotifications();
+    try {
+      parsePacket(await ch.readValue());
+    } catch (readErr) {
+      // 有的电脑刚连上还读不到，等下一次通知即可。
+    }
+    stopDemo();
+    linkPill.textContent = "已连接 " + (device.name || "B-Water");
+    linkPill.classList.add("on");
+    $("connectBtn").textContent = "断开蓝牙";
+    device.addEventListener("gattserverdisconnected", () => {
+      linkPill.textContent = "蓝牙已断开";
+      linkPill.classList.remove("on");
+      $("connectBtn").textContent = "连接蓝牙";
+      showBanner("蓝牙断开了。板子复位后会重新广播，再点一次「连接蓝牙」。");
+    }, { once: true });
+  } catch (err) {
+    bleFail(err);
+  }
+}
+
+function metersBetween(a, b) {
+  const R = 6371000;
+  const p1 = a.lat * Math.PI / 180;
+  const p2 = b.lat * Math.PI / 180;
+  const dp = (b.lat - a.lat) * Math.PI / 180;
+  const dl = (b.lng - a.lng) * Math.PI / 180;
+  const s = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+function radiusValue() {
+  return Number($("radius").value);
+}
+
+function renderZones() {
+  const body = $("zoneBody");
+  body.innerHTML = "";
+  const radius = radiusValue();
+  const ranked = ZONES.map((z) => ({
+    ...z,
+    meters: gps ? metersBetween(gps, z) : null
+  })).sort((a, b) => {
+    if (a.meters === null) return 0;
+    return a.meters - b.meters;
+  });
+  ranked.forEach((z) => {
+    const tr = document.createElement("tr");
+    const inside = z.meters !== null && z.meters <= radius;
+    if (inside) tr.className = "inside";
+    const distText = z.meters === null ? "—" : (z.meters < 1000 ? Math.round(z.meters) + " 米" : (z.meters / 1000).toFixed(2) + " 公里");
+    tr.innerHTML = "<td>" + z.name + "</td><td>" + z.lat.toFixed(6) + "</td><td>" + z.lng.toFixed(6) + "</td><td>" + distText + "</td>";
+    body.appendChild(tr);
+  });
+
+  const inside = ranked.filter((z) => z.meters !== null && z.meters <= radius);
+  const status = $("gpsStatus");
+  if (!gps) {
+    status.textContent = "尚未定位";
+    status.className = "gps-status";
+  } else if (inside.length) {
+    status.textContent = "已进入危险地区：" + inside.map((z) => z.name).join("、");
+    status.className = "gps-status danger";
+  } else {
+    const near = ranked[0];
+    status.textContent = "未进入危险范围。最近是" + near.name + "，" + (near.meters < 1000 ? Math.round(near.meters) + " 米" : (near.meters / 1000).toFixed(2) + " 公里");
+    status.className = "gps-status safe";
+  }
+  drawMap(ranked, radius);
+}
+
+function drawMap(ranked, radius) {
+  if (!map) return;
+  zoneLayer.clearLayers();
+  ranked.forEach((z) => {
+    const inside = z.meters !== null && z.meters <= radius;
+    L.circleMarker([z.lat, z.lng], {
+      radius: 7,
+      color: inside ? "#e24b4b" : "#8ea0b8",
+      fillColor: inside ? "#e24b4b" : "#d5deea",
+      fillOpacity: 0.9,
+      weight: 2
+    }).bindPopup(z.name).addTo(zoneLayer);
+    L.circle([z.lat, z.lng], {
+      radius: radius,
+      color: inside ? "#e24b4b" : "#8ea0b8",
+      weight: 1,
+      fillOpacity: 0.05
+    }).addTo(zoneLayer);
+  });
+  if (gps) {
+    if (!userMarker) {
+      userMarker = L.circleMarker([gps.lat, gps.lng], {
+        radius: 9,
+        color: "#3c86e8",
+        fillColor: "#3c86e8",
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(map);
+      userMarker.bindPopup("我的位置");
+    } else {
+      userMarker.setLatLng([gps.lat, gps.lng]);
+    }
+    if (!fitted) {
+      const bounds = L.latLngBounds(ranked.map((z) => [z.lat, z.lng]));
+      bounds.extend([gps.lat, gps.lng]);
+      map.fitBounds(bounds.pad(0.2));
+      fitted = true;
+    }
+  }
+}
+
+function locate() {
+  if (!navigator.geolocation) {
+    showBanner("这台设备的浏览器不能提供 GPS 定位。");
+    return;
+  }
+  $("here").textContent = "正在定位…";
+  navigator.geolocation.getCurrentPosition((pos) => {
+    gps = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
+    $("here").textContent = "北纬 " + gps.lat.toFixed(6) + "°，东经 " + gps.lng.toFixed(6) + "°，精度约 " + Math.round(gps.acc) + " 米";
+    renderZones();
+  }, (err) => {
+    $("here").textContent = "定位被拒绝或失败：" + err.message;
+  }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 2000 });
+}
+
+const MAP_SOURCES = [
+  {
+    url: "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}",
+    options: { subdomains: ["1", "2", "3", "4"], maxZoom: 18, attribution: "&copy; 高德地图" }
+  },
+  {
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    options: { subdomains: ["a", "b", "c"], maxZoom: 18, attribution: "&copy; OpenStreetMap" }
+  }
+];
+
+function initMap() {
+  $("mark50").style.bottom = (50 / 80 * 100) + "%";
+  $("mark40").style.bottom = (40 / 80 * 100) + "%";
+  if (!window.L) {
+    $("map").textContent = "地图库没有加载。请不要把网页文件单独拷走，要和 vendor 文件夹放在一起。水位数字和坐标列表仍然可用。";
+    renderZones();
+    return;
+  }
+  map = L.map("map", { zoomControl: true }).setView([40.00, 116.45], 10);
+  let sourceIndex = 0;
+  let tileErrors = 0;
+  let baseLayer = null;
+  function useSource(index) {
+    if (baseLayer) map.removeLayer(baseLayer);
+    const src = MAP_SOURCES[index];
+    baseLayer = L.tileLayer(src.url, src.options);
+    baseLayer.on("tileerror", () => {
+      tileErrors += 1;
+      if (tileErrors >= 3 && sourceIndex < MAP_SOURCES.length - 1) {
+        sourceIndex += 1;
+        tileErrors = 0;
+        useSource(sourceIndex);
+      }
+    });
+    baseLayer.addTo(map);
+    if (zoneLayer) zoneLayer.bringToFront();
+  }
+  useSource(0);
+  zoneLayer = L.layerGroup().addTo(map);
+  renderZones();
+  setTimeout(() => map.invalidateSize(), 200);
+  window.addEventListener("resize", () => map.invalidateSize());
+}
+
+document.addEventListener("pointerdown", unlockAudio);
+$("muteBtn").addEventListener("click", () => {
+  unlockAudio();
+  alarmMuted = !alarmMuted;
+  $("muteBtn").textContent = alarmMuted ? "警报声关" : "警报声开";
+  if (alarmMuted) stopAlarm();
+  else syncAlarm(lastAlarmLevel);
+});
+$("connectBtn").addEventListener("click", () => connect(false));
+$("scanAllBtn").addEventListener("click", () => connect(true));
+$("demoBtn").addEventListener("click", () => {
+  if (demoTimer) stopDemo();
+  else startDemo();
+});
+$("locateBtn").addEventListener("click", locate);
+$("radius").addEventListener("input", () => {
+  $("radiusOut").value = $("radius").value;
+  renderZones();
+});
+setInterval(() => {
+  if (!lastAt || demoTimer) return;
+  const sec = Math.round((Date.now() - lastAt) / 1000);
+  $("age").textContent = sec <= 1 ? "刚刚更新" : sec + " 秒前";
+}, 1000);
+initMap();
+</script>
+</body>
+</html>
